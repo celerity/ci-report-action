@@ -1,0 +1,12 @@
+name: 'Celerity CI Report'
+inputs:
+  gh-token:
+    required: true
+  unformatted-files:
+    default: ''
+  builds:
+    description: "List of build configurations for which logs should be analyzed"
+    default: ''
+runs:
+  using: 'node12'
+  main: 'dist/index.js'
