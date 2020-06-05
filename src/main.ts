@@ -6,6 +6,13 @@ import * as artifact from '@actions/artifact'
 
 const artifactClient = artifact.create()
 
+/**
+ * Checks for unformatted files and build warnings and reports results.
+ *
+ * Results are currently reported through a comment on the commit that triggered
+ * this job. If the commit is part of a pull request, GitHub will also display
+ * it in the PR's conversation tab.
+ */
 async function run() {
   try {
     const ghToken = core.getInput('gh-token')
@@ -66,10 +73,10 @@ async function run() {
     }
 
     if (comment !== '') {
-      octocat.issues.createComment({
+      await octocat.repos.createCommitComment({
         owner: github.context.repo.owner,
         repo: github.context.repo.repo,
-        issue_number: github.context.issue.number,
+        commit_sha: github.context.sha,
         body: comment
       })
     }

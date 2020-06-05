@@ -2316,6 +2316,13 @@ const core = __importStar(__webpack_require__(470));
 const github = __importStar(__webpack_require__(469));
 const artifact = __importStar(__webpack_require__(214));
 const artifactClient = artifact.create();
+/**
+ * Checks for unformatted files and build warnings and reports results.
+ *
+ * Results are currently reported through a comment on the commit that triggered
+ * this job. If the commit is part of a pull request, GitHub will also display
+ * it in the PR's conversation tab.
+ */
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
@@ -2364,10 +2371,10 @@ function run() {
                 }
             }
             if (comment !== '') {
-                octocat.issues.createComment({
+                yield octocat.repos.createCommitComment({
                     owner: github.context.repo.owner,
                     repo: github.context.repo.repo,
-                    issue_number: github.context.issue.number,
+                    commit_sha: github.context.sha,
                     body: comment
                 });
             }
