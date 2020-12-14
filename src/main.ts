@@ -1,85 +1,169 @@
 import fs from 'fs'
-import zlib from 'zlib'
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import * as artifact from '@actions/artifact'
 
 const artifactClient = artifact.create()
 
+interface BuildWarning {
+  path: string
+  line: number
+  column: number
+  message: string
+}
+
+// This is what Octokit expects; we should use their type but
+// its buried somewhere deep inside auto-generated type definition files...
+interface Annotation {
+  path: string
+  start_line: number
+  end_line: number
+  start_column?: number
+  end_column?: number
+  annotation_level: 'notice' | 'warning' | 'failure'
+  message: string
+}
+
+async function getBuildWarnings() {
+  const builds = core
+    .getInput('builds')
+    .split(',')
+    .map(b => b.trim())
+
+  const buildWarnings = new Map<string, Array<BuildWarning>>()
+
+  for (const b of builds) {
+    // The actual build names contain the run id and number, so we need to append those.
+    const uniqueBuildName = `${b}-${github.context.runId}-${github.context.runNumber}`
+    const response = await artifactClient.downloadArtifact(
+      `build-${uniqueBuildName}-log`,
+      '.'
+    )
+    const log = fs.readFileSync(
+      `${response.downloadPath}/build-${uniqueBuildName}.log`,
+      {encoding: 'utf8'}
+    )
+
+    const warnings = log
+      .split('\n')
+      // We try to closely match Clang's warning output format (including line and column) to avoid false positives
+      .map(line => line.match(/(^.*):(\d+):(\d+): warning:(.*)$/))
+      .filter(m => m !== null)
+      .map((m: any /* TS thinks this can be null */) => ({
+        // Paths are relative to build folder, which we assume to be within the main working directory.
+        // We need to remove "../" for GitHub to correctly show these annotations within files.
+        path: m[1].substr(3),
+        line: Number.parseInt(m[2]),
+        column: Number.parseInt(m[3]),
+        message: m[4]
+      }))
+
+    if (warnings.length > 0) {
+      buildWarnings.set(b, warnings)
+    }
+  }
+
+  return buildWarnings
+}
+
+function getUnformattedFiles() {
+  return core
+    .getInput('unformatted-files')
+    .split('\n')
+    .map(f => f.trim())
+    .filter(f => f !== '')
+}
+
 /**
  * Checks for unformatted files and build warnings and reports results.
  *
- * Results are currently reported through a comment on the commit that triggered
- * this job. If the commit is part of a pull request, GitHub will also display
- * it in the PR's conversation tab.
+ * Results are reported through the GitHub Checks API.
  */
 async function run() {
   try {
     const ghToken = core.getInput('gh-token')
-    const octocat = new github.GitHub(ghToken)
+    const octocat = github.getOctokit(ghToken)
 
-    let comment = ''
+    const buildWarnings = await getBuildWarnings()
+    const unformattedFiles = getUnformattedFiles()
+    const markAsFailure = unformattedFiles.length != 0
 
-    // Check build logs for warnings
-
-    const builds = core
-      .getInput('builds')
-      .split(',')
-      .map(b => b.trim())
-    const buildWarnings = new Map<string, number>()
-    for (const buildName of builds) {
-      const response = await artifactClient.downloadArtifact(
-        `build-${buildName}-log`,
-        '.'
-      )
-      // For some reason what we get is still gzipped
-      const compressedLog = fs.readFileSync(
-        `${response.downloadPath}/build-${buildName}.log`
-      )
-      const log = zlib.gunzipSync(compressedLog).toString('utf8')
-      // We try to closely match Clang's warning output format (including line and column) to avoid false positives
-      const warningCount = (log.match(/^.*:\d+:\d+: warning:.*$/gm) || [])
-        .length
-      if (warningCount > 0) {
-        buildWarnings.set(buildName, warningCount)
-      }
-    }
+    const annotations: Array<Annotation> = []
+    const summarySections: Array<string> = []
+    const textSections: Array<string> = []
 
     if (buildWarnings.size > 0) {
-      comment += '⚠️ Warnings were generated for the following builds:\n'
-      buildWarnings.forEach((warningCount, buildName) => {
-        comment += `- ${buildName}: ${warningCount}\n`
+      buildWarnings.forEach((warnings, buildName) => {
+        for (const w of warnings) {
+          annotations.push({
+            path: w.path,
+            start_line: w.line,
+            end_line: w.line,
+            start_column: w.column,
+            end_column: w.column,
+            annotation_level: 'warning',
+            message: `Build "${buildName}" generated warning: ${w.message}`
+          })
+        }
       })
+
+      summarySections.push(
+        `Warnings were generated for ${buildWarnings.size} build(s).`
+      )
+      let text = '⚠️ Warnings were generated for the following build(s):\n'
+      buildWarnings.forEach((warnings, buildName) => {
+        text += `- ${buildName}: ${warnings.length}\n`
+      })
+      textSections.push(text)
+    } else {
+      summarySections.push('No warnings were generated.')
     }
 
-    // Report unformatted files
-
-    const unformattedFiles = core
-      .getInput('unformatted-files')
-      .split('\n')
-      .map(f => f.trim())
-      .filter(f => f !== '')
-    if (unformattedFiles.length !== 0) {
-      if (comment !== '') comment += '\n\n'
-      comment +=
-        '⚠️ The following files are not formatted according to `.clang-format`:\n' +
-        unformattedFiles.map(f => `- ${f}`).join('\n')
+    if (unformattedFiles.length > 0) {
       for (const f of unformattedFiles) {
-        // TODO: Is there a JS API for this?
-        console.log(
-          `::warning file=${f}:: File is not formatted according to \`.clang-format\``
-        )
+        annotations.push({
+          path: f,
+          start_line: 1,
+          end_line: 1,
+          annotation_level: 'failure',
+          message: 'File is not formatted according to `.clang-format`.'
+        })
       }
+
+      summarySections.push(
+        'Some files are not formatted according to `.clang-format`.'
+      )
+      textSections.push(
+        '️❌ The following files are not formatted according to `.clang-format`:\n' +
+          unformattedFiles.map(f => `- ${f}`).join('\n')
+      )
+    } else {
+      summarySections.push(
+        'All files are formatted according to `.clang-format`.'
+      )
     }
 
-    if (comment !== '') {
-      await octocat.repos.createCommitComment({
-        owner: github.context.repo.owner,
-        repo: github.context.repo.repo,
-        commit_sha: github.context.sha,
-        body: comment
-      })
-    }
+    const {eventName} = github.context
+    const trigger =
+      eventName === 'pull_request' || eventName === 'pull_request_target'
+        ? 'pr'
+        : eventName
+
+    await octocat.checks.create({
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+      head_sha: github.context.sha,
+      // Use different name for Check depending on how this was triggered.
+      name: `celerity-ci-report-${trigger}`,
+      completed_at: new Date().toISOString(),
+      conclusion: markAsFailure ? 'failure' : 'success',
+      output: {
+        title: 'Celerity CI Report',
+        summary: summarySections.join(' '),
+        text: textSections.join('\n\n'),
+        annotations
+      }
+    })
   } catch (error) {
     core.setFailed(error.message)
   }
