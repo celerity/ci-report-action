@@ -25,24 +25,16 @@ interface Annotation {
 }
 
 async function getBuildWarnings() {
-  const builds = core
-    .getInput('builds')
-    .split(',')
-    .map(b => b.trim())
+  // We download all artifacts under the assumption that they only contain build logs.
+  // TODO: Decide which artifacts to download (based on name?) once https://github.com/actions/toolkit/issues/379 is fixed.
+  const allArtifacts = await artifactClient.downloadAllArtifacts()
 
   const buildWarnings = new Map<string, Array<BuildWarning>>()
 
-  for (const b of builds) {
-    // The actual build names contain the run id and number, so we need to append those.
-    const uniqueBuildName = `${b}-${github.context.runId}-${github.context.runNumber}`
-    const response = await artifactClient.downloadArtifact(
-      `build-${uniqueBuildName}-log`,
-      '.'
-    )
-    const log = fs.readFileSync(
-      `${response.downloadPath}/build-${uniqueBuildName}.log`,
-      {encoding: 'utf8'}
-    )
+  for (const {artifactName: buildName, downloadPath} of allArtifacts) {
+    const log = fs.readFileSync(`${downloadPath}/${buildName}.log`, {
+      encoding: 'utf8'
+    })
 
     const warnings = log
       .split('\n')
@@ -59,7 +51,7 @@ async function getBuildWarnings() {
       }))
 
     if (warnings.length > 0) {
-      buildWarnings.set(b, warnings)
+      buildWarnings.set(buildName, warnings)
     }
   }
 
@@ -149,7 +141,7 @@ async function run() {
         ? 'pr'
         : eventName
 
-    await octocat.checks.create({
+    await octocat.rest.checks.create({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
       head_sha: github.context.sha,
