@@ -55,7 +55,8 @@ async function getBuildWarnings() {
     }
   }
 
-  return buildWarnings
+  const numBuilds = allArtifacts.length
+  return {buildWarnings, numBuilds}
 }
 
 function getUnformattedFiles() {
@@ -65,6 +66,9 @@ function getUnformattedFiles() {
     .map(f => f.trim())
     .filter(f => f !== '')
 }
+
+// We are limited to 50 warnings in a single API request
+const MAX_WARNING_ANNOTATIONS = 50
 
 /**
  * Checks for unformatted files and build warnings and reports results.
@@ -76,7 +80,7 @@ async function run() {
     const ghToken = core.getInput('gh-token')
     const octocat = github.getOctokit(ghToken)
 
-    const buildWarnings = await getBuildWarnings()
+    const {buildWarnings, numBuilds} = await getBuildWarnings()
     const unformattedFiles = getUnformattedFiles()
     const markAsFailure = unformattedFiles.length != 0
 
@@ -85,8 +89,12 @@ async function run() {
     const textSections: Array<string> = []
 
     if (buildWarnings.size > 0) {
+      let totalWarningCount = 0
+      let warningAnnotationsCreated = 0
       buildWarnings.forEach((warnings, buildName) => {
+        totalWarningCount += warnings.length
         for (const w of warnings) {
+          if (++warningAnnotationsCreated == MAX_WARNING_ANNOTATIONS) break
           annotations.push({
             path: w.path,
             start_line: w.line,
@@ -100,12 +108,15 @@ async function run() {
       })
 
       summarySections.push(
-        `Warnings were generated for ${buildWarnings.size} build(s).`
+        `Warnings were generated for ${buildWarnings.size} of ${numBuilds} build(s).`
       )
       let text = '⚠️ Warnings were generated for the following build(s):\n'
       buildWarnings.forEach((warnings, buildName) => {
         text += `- ${buildName}: ${warnings.length}\n`
       })
+      if (totalWarningCount >= MAX_WARNING_ANNOTATIONS) {
+        text += `\n\nShowing first **${MAX_WARNING_ANNOTATIONS}** warnings out of **${totalWarningCount}** total.`
+      }
       textSections.push(text)
     } else {
       summarySections.push('No warnings were generated.')
