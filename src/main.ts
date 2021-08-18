@@ -94,7 +94,7 @@ async function run() {
       buildWarnings.forEach((warnings, buildName) => {
         totalWarningCount += warnings.length
         for (const w of warnings) {
-          if (++warningAnnotationsCreated == MAX_WARNING_ANNOTATIONS) break
+          if (++warningAnnotationsCreated >= MAX_WARNING_ANNOTATIONS) break
           annotations.push({
             path: w.path,
             start_line: w.line,
