@@ -2718,8 +2718,8 @@ function getUnformattedFiles() {
         .map(f => f.trim())
         .filter(f => f !== '');
 }
-// We are limited to 50 warnings in a single API request
-const MAX_WARNING_ANNOTATIONS = 50;
+// We are limited to 50 annotations in a single API request
+const MAX_ANNOTATIONS = 50;
 /**
  * Checks for unformatted files and build warnings and reports results.
  *
@@ -2736,13 +2736,15 @@ function run() {
             const annotations = [];
             const summarySections = [];
             const textSections = [];
+            // Reserve space for unformatted file annotations
+            const maxWarningAnnotations = Math.max(0, MAX_ANNOTATIONS - unformattedFiles.length);
             if (buildWarnings.size > 0) {
                 let totalWarningCount = 0;
                 let warningAnnotationsCreated = 0;
                 buildWarnings.forEach((warnings, buildName) => {
                     totalWarningCount += warnings.length;
                     for (const w of warnings) {
-                        if (++warningAnnotationsCreated >= MAX_WARNING_ANNOTATIONS)
+                        if (++warningAnnotationsCreated >= maxWarningAnnotations)
                             break;
                         annotations.push({
                             path: w.path,
@@ -2760,8 +2762,8 @@ function run() {
                 buildWarnings.forEach((warnings, buildName) => {
                     text += `- ${buildName}: ${warnings.length}\n`;
                 });
-                if (totalWarningCount >= MAX_WARNING_ANNOTATIONS) {
-                    text += `\n\nShowing first **${MAX_WARNING_ANNOTATIONS}** warnings out of **${totalWarningCount}** total.`;
+                if (totalWarningCount >= maxWarningAnnotations) {
+                    text += `\n\nShowing first **${maxWarningAnnotations}** warnings out of **${totalWarningCount}** total.`;
                 }
                 textSections.push(text);
             }
