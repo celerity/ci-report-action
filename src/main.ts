@@ -173,8 +173,8 @@ async function run() {
         annotations
       }
     })
-  } catch (error) {
-    core.setFailed(error.message)
+  } catch (error: any) {
+    core.setFailed(error.message ?? "Unknown error")
   }
 }
 
