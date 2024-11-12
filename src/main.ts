@@ -171,10 +171,26 @@ async function run() {
         ? 'pr'
         : eventName
 
-    await octocat.rest.checks.create({
+    let headSha = github.context.sha
+    // For PRs we have to find the correct SHA to attach the check to.
+    // (There might be an easier way of doing this, but I couldn't find it.)
+    if (trigger === 'pr') {
+      const {data: pullRequest, status} = await octocat.rest.pulls.get({
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        pull_number: github.context.payload.pull_request?.number!
+      })
+      if (status !== 200) {
+        core.setFailed(`Failed to get pull request: ${status}`)
+        return
+      }
+      headSha = pullRequest.head.sha
+    }
+
+    const response = await octocat.rest.checks.create({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
-      head_sha: github.context.sha,
+      head_sha: headSha,
       // Use different name for Check depending on how this was triggered.
       name: `celerity-ci-report-${trigger}`,
       completed_at: new Date().toISOString(),
@@ -192,6 +208,11 @@ async function run() {
         annotations
       }
     })
+
+    if (response.status !== 201) {
+      core.setFailed(`Failed to create check: ${response}`)
+      return
+    }
 
     // Creating a failed check for some reason doesn't fail the CI run,
     // so we additionally have to fail this action.
