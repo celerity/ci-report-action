@@ -1,9 +1,9 @@
 import fs from 'fs'
 import * as core from '@actions/core'
 import * as github from '@actions/github'
-import * as artifact from '@actions/artifact'
+import {DefaultArtifactClient} from '@actions/artifact'
 
-const artifactClient = artifact.create()
+const artifactClient = new DefaultArtifactClient()
 
 interface BuildWarning {
   path: string
@@ -27,7 +27,17 @@ interface Annotation {
 async function getBuildWarnings() {
   // We download all artifacts under the assumption that they only contain build logs.
   // TODO: Decide which artifacts to download (based on name?) once https://github.com/actions/toolkit/issues/379 is fixed.
-  const allArtifacts = await artifactClient.downloadAllArtifacts()
+  const metaData = await artifactClient.listArtifacts()
+  const allArtifacts = await Promise.all(
+    metaData.artifacts.map(async meta => {
+      console.log(`Downloading artifact ${meta.id} "${meta.name}"`)
+      const {downloadPath} = await artifactClient.downloadArtifact(meta.id)
+      return {
+        artifactName: meta.name,
+        downloadPath
+      }
+    })
+  )
 
   const buildWarnings = new Map<string, Array<BuildWarning>>()
 
