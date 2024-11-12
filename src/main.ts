@@ -81,6 +81,10 @@ async function run() {
     const octocat = github.getOctokit(ghToken)
 
     const {buildWarnings, numBuilds} = await getBuildWarnings()
+    if (numBuilds === 0) {
+      core.setFailed('No build logs found')
+      return
+    }
     const unformattedFiles = getUnformattedFiles()
 
     const annotations: Array<Annotation> = []
