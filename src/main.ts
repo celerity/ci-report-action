@@ -165,7 +165,12 @@ async function run() {
       name: `celerity-ci-report-${trigger}`,
       completed_at: new Date().toISOString(),
       // There is no "warning" conclusion, so we set it to "action_required" if there a build warnings.
-      conclusion: unformattedFiles.length > 0 ? 'failure' : (buildWarnings.size > 0 ? 'action_required' : 'success'),
+      conclusion:
+        unformattedFiles.length > 0
+          ? 'failure'
+          : buildWarnings.size > 0
+            ? 'action_required'
+            : 'success',
       output: {
         title: 'Celerity CI Report',
         summary: summarySections.join(' '),
@@ -176,11 +181,11 @@ async function run() {
 
     // Creating a failed check for some reason doesn't fail the CI run,
     // so we additionally have to fail this action.
-    if(unformattedFiles.length > 0) {
+    if (unformattedFiles.length > 0) {
       core.setFailed(summarySections[1])
     }
   } catch (error: any) {
-    core.setFailed(error.message ?? "Unknown error")
+    core.setFailed(error.message ?? 'Unknown error')
   }
 }
 
